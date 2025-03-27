@@ -56,7 +56,6 @@ class Trainer:
         if verbose:
             print(f"    Episode complete - Final state: {state}, Total reward: {total_reward:.2f}")
         
-        # FIX: Use 'total_error' instead of 'state_error' which doesn't exist
         return {
             'states': np.array(states),
             'actions': np.array(actions),
@@ -65,7 +64,7 @@ class Trainer:
             'dones': np.array(dones),
             'total_reward': total_reward,
             'episode_length': len(states),
-            'final_state_error': info['total_error']  # Changed from 'state_error' to 'total_error'
+            'final_state_error': info['state_error']
         }
     
     def train(self):
@@ -73,8 +72,8 @@ class Trainer:
         print("Starting training...")
         
         # Parameters for batch collection - INCREASE THESE
-        batch_size = 128  # Larger batch size
-        max_buffer_size = 4096  # More experience data
+        batch_size = 128  # Increase from 64 to 128
+        max_buffer_size = 4096  # Increase from 1024 to 4096
         
         # Storage for batch data
         batch_states = []
@@ -83,20 +82,23 @@ class Trainer:
         batch_next_states = []
         batch_dones = []
         
-        # Initialize losses dict to prevent reference before assignment
-        losses = {'policy_loss': 0.0, 'value_loss': 0.0, 'entropy': 0.0, 'total_loss': 0.0}
+        # Initialize losses dict to store latest losses
+        losses = {'policy_loss': 0.0, 'value_loss': 0.0, 'entropy': 0.0}
         
-        # Better curriculum learning
         for episode in range(1, self.num_episodes + 1):
-            # More gradual difficulty scaling
-            if episode < self.num_episodes * 0.1:
-                difficulty = 0.3  # Start moderate 
+            # Super aggressive curriculum - start almost at target
+            if episode < self.num_episodes * 0.2:
+                difficulty = 0.001  # Extremely tiny initial states (practically at target)
             elif episode < self.num_episodes * 0.3:
-                difficulty = 0.6  # Increase over time
-            elif episode < self.num_episodes * 0.6:
-                difficulty = 0.8
+                difficulty = 0.01   # Still very close
+            elif episode < self.num_episodes * 0.4:
+                difficulty = 0.05   # Very close
+            elif episode < self.num_episodes * 0.5:
+                difficulty = 0.1    # Slightly farther
+            elif episode < self.num_episodes * 0.7:
+                difficulty = 0.3    # Medium distance
             else:
-                difficulty = 1.0
+                difficulty = 0.6    # Larger but still not full range
             
             # Reset environment with current difficulty
             state = self.env.reset(difficulty=difficulty)
@@ -132,6 +134,10 @@ class Trainer:
                     np.array(batch_next_states),
                     np.array(batch_dones)
                 )
+                
+                # Clear buffers after update (optional)
+                # batch_states, batch_actions, batch_rewards = [], [], []
+                # batch_next_states, batch_dones = [], []
             
             # Store metrics
             self.rewards_history.append(trajectory['total_reward'])

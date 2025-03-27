@@ -4,7 +4,7 @@ class Config:
     # Environment parameters
     dt = 0.1
     max_steps = 100
-    control_limit = 1.0
+    control_limit = 4.0
     
     # Model parameters
     state_dim = 2

@@ -37,52 +37,61 @@ class Lambda(nn.Module):
 
 class TransformerControlNetwork(nn.Module):
     """Transformer-based actor-critic network for control problems"""
-    def __init__(self, state_dim, action_dim, hidden_dim=128, num_heads=8, 
-                 num_layers=3, dropout=0.1, max_seq_length=100):
+    def __init__(
+        self, 
+        state_dim=2,           # Position and velocity
+        action_dim=1,          # Acceleration
+        hidden_dim=64,         # Size of embeddings/hidden layers
+        num_heads=4,           # Number of attention heads
+        num_layers=2,          # Number of transformer layers
+        max_seq_length=20,     # Max length of state history
+    ):
         super().__init__()
+        
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.hidden_dim = hidden_dim
+        self.max_seq_length = max_seq_length
         
-        # Input embedding
+        # Main components of the transformer model:
+
+        # 1. State embedding layer: converts state vectors to higher dimensional representations
         self.state_embedding = nn.Linear(state_dim, hidden_dim)
-        
-        # Positional encoding
-        self.pos_encoder = PositionalEncoding(hidden_dim, max_seq_length)
-        
-        # Transformer encoder
-        encoder_layers = nn.TransformerEncoderLayer(
-            d_model=hidden_dim, 
+
+        # 2. Positional encoding: adds temporal information to the embedded states
+        self.positional_encoding = PositionalEncoding(hidden_dim, max_seq_length)
+
+        # 3. Transformer encoder: processes the sequence of embedded states
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
             nhead=num_heads,
-            dim_feedforward=hidden_dim*4,  # Larger feedforward network
-            dropout=dropout,
+            dim_feedforward=hidden_dim*4,
             batch_first=True
         )
         self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layers, 
+            encoder_layer, 
             num_layers=num_layers
         )
-        
-        # Output heads with larger capacity
-        self.action_mean = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim)
-        )
-        
-        self.action_std = nn.Sequential(
+
+        # 4. Policy head (actor): outputs mean of action distribution
+        self.policy_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, action_dim),
-            nn.Softplus(),  # Use softplus instead of exp for better stability
-            Lambda(lambda x: x + 1e-5)  # Add small constant to prevent zeros
+            nn.Tanh(),  # Outputs [-1, 1]
+            # Scale to control limit range - use full range
+            Lambda(lambda x: x * 3.0)  # Scale to [-3, 3]
         )
-        
-        self.value = nn.Sequential(
+
+        # 5. Value head (critic): estimates state value
+        self.value_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
+        
+        # Action log standard deviation (learnable)
+        self.log_std = nn.Parameter(torch.ones(action_dim) * -1.0)  # Start with lower std for more stable initial behavior
     
     def forward(self, states):
         """
@@ -107,7 +116,7 @@ class TransformerControlNetwork(nn.Module):
         embeddings = self.state_embedding(states)
         
         # Add positional encoding
-        embeddings = self.pos_encoder(embeddings)
+        embeddings = self.positional_encoding(embeddings)
         
         # Pass through transformer encoder
         transformer_output = self.transformer_encoder(embeddings)
@@ -116,9 +125,11 @@ class TransformerControlNetwork(nn.Module):
         final_representation = transformer_output[:, -1, :]
         
         # Get action mean and value estimate
-        action_mean = self.action_mean(final_representation)
-        action_std = self.action_std(final_representation)
-        value = self.value(final_representation)
+        action_mean = self.policy_head(final_representation)
+        value = self.value_head(final_representation)
+        
+        # Fixed action standard deviation
+        action_std = torch.exp(self.log_std).expand_as(action_mean)
         
         return action_mean, action_std, value
     

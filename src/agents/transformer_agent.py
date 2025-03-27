@@ -143,14 +143,13 @@ class TransformerControlAgent:
             if action_stds.dim() == 2:
                 action_stds = action_stds.unsqueeze(-1)
             
-            # FIX: Handle different tensor shapes correctly
-            # Make sure values has the same shape as returns_tensor for loss calculation
-            if values.size(-1) == 1 and values.dim() == 3:  # [batch, seq, 1]
-                values = values.squeeze(-1)  # -> [batch, seq]
-            elif values.dim() == 2 and returns_tensor.dim() == 3:
-                values = values.unsqueeze(-1)  # -> [batch, seq, 1]
+            # FIX: Properly handle the values tensor shape for sequence data
+            if values.dim() == 2:  # [batch_size, 1]
+                # Expand values to match returns_tensor shape [batch_size, seq_length]
+                seq_length = returns_tensor.size(1)
+                values = values.expand(-1, seq_length)
             
-            # Compute advantage estimates
+            # Calculate advantages using properly shaped values
             advantages = returns_tensor - values
             
             # Normalize advantages
@@ -169,27 +168,9 @@ class TransformerControlAgent:
             clipped_ratio = torch.clamp(ratio, 1-clip_param, 1+clip_param)
             policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
             
-            # FIX: Proper handling of tensor shapes for MSE loss calculation
-            values_for_loss = values
-            returns_for_loss = returns_tensor
-            
-            # FIX: Properly align tensor dimensions
-            if values_for_loss.dim() == 3 and returns_for_loss.dim() == 2:
-                # Values is [batch, seq, 1], returns is [batch, seq]
-                values_for_loss = values_for_loss.squeeze(-1)  # -> [batch, seq]
-            elif values_for_loss.dim() == 2 and returns_for_loss.dim() == 3:
-                # Values is [batch, seq], returns is [batch, seq, 1]
-                returns_for_loss = returns_for_loss.squeeze(-1)  # -> [batch, seq]
-            elif values_for_loss.dim() == returns_for_loss.dim():
-                # Both have same number of dimensions, but need to check sizes
-                if values_for_loss.size() != returns_for_loss.size():
-                    # Reshape tensors to match - use the shorter sequence length
-                    min_seq_len = min(values_for_loss.size(1), returns_for_loss.size(1))
-                    values_for_loss = values_for_loss[:, :min_seq_len]
-                    returns_for_loss = returns_for_loss[:, :min_seq_len]
-            
-            # Compute value loss with correctly sized tensors
-            value_loss = F.mse_loss(values_for_loss, returns_for_loss)
+            # FIX: Reshape returns_tensor for MSE loss calculation
+            # Flatten both tensors to ensure they have the same shape
+            value_loss = F.mse_loss(values.reshape(-1), returns_tensor.reshape(-1))
             
             # Entropy loss (for exploration)
             entropy = dist.entropy().mean()
@@ -197,24 +178,10 @@ class TransformerControlAgent:
             # Total loss
             loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
             
-            # Check for NaN values in gradients
-            for param in self.model.parameters():
-                if param.grad is not None and torch.isnan(param.grad).any():
-                    print("NaN detected in gradients! Skipping update.")
-                    return {
-                        'policy_loss': float(policy_loss.item() if not torch.isnan(policy_loss).any() else 0.0),
-                        'value_loss': float(value_loss.item() if not torch.isnan(value_loss).any() else 0.0),
-                        'entropy': float(entropy.item() if not torch.isnan(entropy).any() else 0.0),
-                        'total_loss': float(loss.item() if not torch.isnan(loss).any() else 0.0)
-                    }
-            
             # Update model
             self.optimizer.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            for param in self.model.parameters():
-                if param.grad is not None:
-                    param.grad.data.clamp_(-1.0, 1.0)
+            nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
             self.optimizer.step()
         
         return {

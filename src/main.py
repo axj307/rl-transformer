@@ -14,38 +14,33 @@ def main():
     torch.manual_seed(42)
     np.random.seed(42)
     
-    # Environment parameters - increased max_steps for better convergence
-    env = DoubleIntegratorEnv(
-        dt=0.1, 
-        max_steps=50,  
-        control_limit=4.0  # Sufficient control authority
-    )
+    # Environment parameters
+    env = DoubleIntegratorEnv(dt=0.1, max_steps=15, control_limit=3.0)  # Changed from 100 to 15
     
-    # Model architecture
+    # Model architecture - improve parameters
     model = TransformerControlNetwork(
         state_dim=2,
         action_dim=1,
-        hidden_dim=128,
-        num_heads=8,
-        num_layers=3,
-        dropout=0.1,  # Add dropout for better generalization
-        max_seq_length=50  # Match with max_steps
+        hidden_dim=64,       # Increase from 32 back to 64
+        num_heads=4,         # Increase from 2 back to 4
+        num_layers=2,        # Increase from 1 back to 2
+        max_seq_length=15
     )
     
-    # Agent parameters - More stable learning
+    # Learning parameters
     agent = TransformerControlAgent(
         model=model,
-        lr=0.0001,  # Reduce from 0.0003 to 0.0001
-        gamma=0.99,  # Higher discount factor for long-term planning
-        memory_length=50  # Match with max_steps
+        lr=0.0003,            # Increase from 0.0001 back to 0.0003 for faster learning
+        gamma=0.95,           # Slightly lower gamma to focus more on immediate rewards
+        memory_length=15      # Match memory length to max_steps
     )
     
     # Training parameters
     trainer = Trainer(
         env=env,
         agent=agent,
-        num_episodes=10000,  # DOUBLE training duration
-        logging_interval=100
+        num_episodes=5000,    # Increase from 2000 to 5000
+        logging_interval=100  # Change from 20 to 100 to reduce output volume
     )
     
     # Train the agent

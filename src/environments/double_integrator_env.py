@@ -31,68 +31,61 @@ class DoubleIntegratorEnv:
         return self.state.copy()
     
     def step(self, action):
+        """Take a step in the environment using control input"""
+        # Extract scalar value if action is an array
+        if hasattr(action, "__len__"):
+            action = float(action[0])
+        
         # Clip action to control limits
         action = np.clip(action, -self.control_limit, self.control_limit)
         
-        # Store current state
-        current_position, current_velocity = self.state
-        current_error = np.sqrt(current_position**2 + current_velocity**2)
+        # Unpack state
+        position, velocity = self.state
         
-        # Dynamics integration
-        def dynamics(t, x):
-            position, velocity = x
-            return [velocity, action[0]]
+        # Define the system dynamics
+        def system_dynamics(t, state, acceleration):
+            x, v = state
+            return [v, acceleration]  # dx/dt = v, dv/dt = a
         
-        # Integrate dynamics
+        # Solve using DOPRI method (RK45 in scipy)
         solution = solve_ivp(
-            dynamics, 
-            [0, self.dt], 
-            self.state,
-            method='RK45',
+            fun=lambda t, y: system_dynamics(t, y, action),
+            t_span=[0, self.dt],
+            y0=[position, velocity],
+            method='RK45',  # This is the DOPRI45 method
             rtol=1e-6,
             atol=1e-6
         )
         
-        # Get new state
-        new_position, new_velocity = solution.y[:, -1]
+        # Extract the solution at the end time
+        new_position = solution.y[0, -1]
+        new_velocity = solution.y[1, -1]
+        
+        # Update state
         self.state = np.array([new_position, new_velocity])
+        self.step_count += 1
+        
+        # Store current error before update
+        current_error = np.sqrt(position**2 + velocity**2)
         
         # Calculate new error
         new_error = np.sqrt(new_position**2 + new_velocity**2)
         
-        # IMPROVED REWARD FUNCTION
-        # 1. Strong penalty for distance from target
-        position_penalty = -1.0 * new_position**2  # Changed from -5.0
-        velocity_penalty = -1.0 * new_velocity**2  # Changed from -5.0
+        # Modified reward components
+        base_reward = -(new_position**2 + new_velocity**2) * 0.5  # Increase base penalty
+        improvement_reward = max(0, current_error - new_error) * 15.0  # Stronger improvement incentive
+        completion_bonus = 50.0 if new_error < 0.05 else 0.0  # Much larger bonus for accuracy
         
-        # 2. Reward for improvement
-        improvement = max(0, current_error - new_error) * 5.0  # Changed from 20.0
+        # Additional penalty for being far from target
+        distance_penalty = -new_error * 0.3
         
-        # 3. Large bonus for reaching target
-        target_bonus = 0.0
-        if new_error < 0.05:
-            target_bonus = 20.0  # Changed from 100.0
-        elif new_error < 0.1:
-            target_bonus = 10.0  # Changed from 50.0
-        elif new_error < 0.2:
-            target_bonus = 5.0   # Changed from 20.0
+        # Combined reward with distance penalty
+        reward = base_reward + improvement_reward + completion_bonus + distance_penalty
         
-        # 4. Control effort penalty
-        control_penalty = -0.1 * action[0]**2
+        # Check if done
+        done = self.step_count >= self.max_steps
         
-        # Combined reward
-        reward = position_penalty + velocity_penalty + improvement + target_bonus + control_penalty
+        # State error (for evaluation)
+        state_error = np.sqrt(new_position**2 + new_velocity**2)
         
-        # Update step count and check termination
-        self.step_count += 1
-        done = (self.step_count >= self.max_steps) or (new_error < 0.01)
-        
-        # More information in info dict
-        info = {
-            'position_error': abs(new_position),
-            'velocity_error': abs(new_velocity),
-            'total_error': new_error,
-            'improvement': current_error - new_error
-        }
-        
-        return self.state, reward, done, info
+        return self.state.copy(), reward, done, {"state_error": state_error}
