@@ -72,7 +72,7 @@ class Trainer:
         print("Starting training...")
         
         # Parameters for batch collection - INCREASE THESE
-        batch_size = 128  # Increase from 64 to 128
+        batch_size = 1024  # Increase from 64 to 128
         max_buffer_size = 4096  # Increase from 1024 to 4096
         
         # Storage for batch data
@@ -85,23 +85,37 @@ class Trainer:
         # Initialize losses dict to store latest losses
         losses = {'policy_loss': 0.0, 'value_loss': 0.0, 'entropy': 0.0}
         
+        # Initialize metrics dictionaries
+        metrics = {
+            'rewards': [],
+            'state_errors': [],
+            'episode_lengths': []
+        }
+        
+        # Add a metrics recording interval
+        metrics_interval = 10  # Only record every 10th episode
+        
+        # Track recent average performance for curriculum advancement
+        success_threshold = 0.03  # More lenient success threshold
+        window_size = 10
+        recent_errors = deque(maxlen=window_size)
+        current_difficulty = 0.005  # Start easier
+        
         for episode in range(1, self.num_episodes + 1):
-            # Super aggressive curriculum - start almost at target
-            if episode < self.num_episodes * 0.2:
-                difficulty = 0.001  # Extremely tiny initial states (practically at target)
-            elif episode < self.num_episodes * 0.3:
-                difficulty = 0.01   # Still very close
-            elif episode < self.num_episodes * 0.4:
-                difficulty = 0.05   # Very close
-            elif episode < self.num_episodes * 0.5:
-                difficulty = 0.1    # Slightly farther
-            elif episode < self.num_episodes * 0.7:
-                difficulty = 0.3    # Medium distance
-            else:
-                difficulty = 0.6    # Larger but still not full range
+            # Smooth curriculum based on recent performance
+            if len(recent_errors) == window_size:
+                success_rate = sum(1 for err in recent_errors if err < success_threshold) / window_size
+                
+                # Gentler difficulty increases
+                if success_rate > 0.7 and current_difficulty < 1.0:  # Lower success threshold
+                    current_difficulty = min(current_difficulty * 1.1, 1.0)  # Only 10% increase
+                
+                # Add difficulty decrease mechanism
+                elif success_rate < 0.3 and current_difficulty > 0.005:
+                    current_difficulty = max(current_difficulty * 0.9, 0.005)  # Decrease by 10%
             
             # Reset environment with current difficulty
-            state = self.env.reset(difficulty=difficulty)
+            state = self.env.reset(difficulty=current_difficulty)
             
             # Print initial state for debug
             if episode % self.logging_interval == 0:
@@ -144,6 +158,15 @@ class Trainer:
             self.state_errors.append(trajectory['final_state_error'])
             self.episode_lengths.append(trajectory['episode_length'])
             
+            # Store recent errors for curriculum adjustment
+            recent_errors.append(trajectory['final_state_error'])
+            
+            # Only store metrics every metrics_interval episodes
+            if episode % metrics_interval == 0:
+                metrics['rewards'].append(trajectory['total_reward'])
+                metrics['state_errors'].append(trajectory['final_state_error'])
+                metrics['episode_lengths'].append(trajectory['episode_length'])
+            
             # Logging
             if episode % self.logging_interval == 0:
                 avg_reward = np.mean(self.rewards_history[-self.logging_interval:])
@@ -164,8 +187,4 @@ class Trainer:
                 print()
         
         print("Training complete!")
-        return {
-            'rewards': self.rewards_history,
-            'state_errors': self.state_errors,
-            'episode_lengths': self.episode_lengths
-        }
+        return metrics

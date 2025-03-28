@@ -15,16 +15,18 @@ def main():
     np.random.seed(42)
     
     # Environment parameters
-    env = DoubleIntegratorEnv(dt=0.1, max_steps=15, control_limit=3.0)  # Changed from 100 to 15
+    control_limit = 2.0
+    env = DoubleIntegratorEnv(dt=0.1, max_steps=15, control_limit=control_limit)   
     
-    # Model architecture - improve parameters
+    # Model architecture - pass control limit
     model = TransformerControlNetwork(
         state_dim=2,
         action_dim=1,
         hidden_dim=64,       # Increase from 32 back to 64
         num_heads=4,         # Increase from 2 back to 4
         num_layers=2,        # Increase from 1 back to 2
-        max_seq_length=15
+        max_seq_length=15,
+        control_limit=control_limit  # Match the environment's control limit
     )
     
     # Learning parameters
@@ -39,37 +41,41 @@ def main():
     trainer = Trainer(
         env=env,
         agent=agent,
-        num_episodes=5000,    # Increase from 2000 to 5000
+        num_episodes=20000,    # Increase from 2000 to 5000
         logging_interval=100  # Change from 20 to 100 to reduce output volume
     )
     
     # Train the agent
     metrics = trainer.train()
     
-    # Plot training progress
+    # Create x-axis values that match the recorded intervals
+    metrics_interval = 10  # Same value as used in the Trainer class
+    episodes = [i * metrics_interval for i in range(len(metrics['rewards']))]
+    
+    # Plot training progress with fewer points
     plt.figure(figsize=(15, 5))
     
     plt.subplot(1, 3, 1)
-    plt.plot(metrics['rewards'])
+    plt.plot(episodes, metrics['rewards'])
     plt.title('Episode Rewards')
     plt.xlabel('Episode')
     plt.ylabel('Reward')
     
     plt.subplot(1, 3, 2)
-    plt.plot(metrics['state_errors'])
+    plt.plot(episodes, metrics['state_errors'])
     plt.title('Final State Error')
     plt.xlabel('Episode')
     plt.ylabel('Error')
     
     plt.subplot(1, 3, 3)
-    plt.plot(metrics['episode_lengths'])
+    plt.plot(episodes, metrics['episode_lengths'])
     plt.title('Episode Length')
     plt.xlabel('Episode')
     plt.ylabel('Steps')
     
     plt.tight_layout()
     plt.savefig('training_progress.png')
-    plt.show(block=False)
+    plt.close()  # Close the figure to free memory
     
     # Visualize a trajectory with the trained policy
     visualize_trajectory(env, agent)
@@ -127,7 +133,8 @@ def visualize_trajectory(env, agent, initial_state=None):
     
     plt.tight_layout()
     plt.savefig('trajectory.png')
-    plt.show()
+    plt.close()  # Close the figure to free memory
+
 
 if __name__ == "__main__":
     main()

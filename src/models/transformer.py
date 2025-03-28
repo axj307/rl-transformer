@@ -45,6 +45,7 @@ class TransformerControlNetwork(nn.Module):
         num_heads=4,           # Number of attention heads
         num_layers=2,          # Number of transformer layers
         max_seq_length=20,     # Max length of state history
+        control_limit=1.0,     # Add this parameter
     ):
         super().__init__()
         
@@ -52,6 +53,7 @@ class TransformerControlNetwork(nn.Module):
         self.action_dim = action_dim
         self.hidden_dim = hidden_dim
         self.max_seq_length = max_seq_length
+        self.control_limit = control_limit  # Save the control limit
         
         # Main components of the transformer model:
 
@@ -79,8 +81,8 @@ class TransformerControlNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, action_dim),
             nn.Tanh(),  # Outputs [-1, 1]
-            # Scale to control limit range - use full range
-            Lambda(lambda x: x * 3.0)  # Scale to [-3, 3]
+            # Match scaling to environment's control limit
+            Lambda(lambda x: x * self.control_limit)  # Scale to match env control limit
         )
 
         # 5. Value head (critic): estimates state value
@@ -91,7 +93,7 @@ class TransformerControlNetwork(nn.Module):
         )
         
         # Action log standard deviation (learnable)
-        self.log_std = nn.Parameter(torch.ones(action_dim) * -1.0)  # Start with lower std for more stable initial behavior
+        self.log_std = nn.Parameter(torch.ones(action_dim) * 0.0)  # Start with higher log_std for more exploration
     
     def forward(self, states):
         """

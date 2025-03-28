@@ -122,7 +122,7 @@ def visualize_multiple_trajectories(env, agent, initial_states=None):
     plt.tight_layout()
     # Save the figure
     plt.savefig('multiple_trajectories.png')
-    plt.show()
+    plt.close()  # Close the figure to free memory
 
 def simulate_trajectory(env, agent, initial_state):
     """Simulate a trajectory from given initial state"""
